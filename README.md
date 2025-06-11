@@ -9,7 +9,7 @@
 
 Your project is live at:
 
-**[https://vercel.com/shamirsecrets-projects/v0-invest](https://test-invest.picwe.org)**
+**[https://test-invest.picwe.org](https://test-invest.picwe.org)**
 
 ## Build your app
 
