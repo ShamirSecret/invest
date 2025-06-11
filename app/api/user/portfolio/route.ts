@@ -10,6 +10,8 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    console.log("Fetching portfolio for wallet:", walletAddress)
+
     // Update investments to 'matured' if their maturity_date has passed and they are 'active'
     await sql`
       UPDATE investments
@@ -28,9 +30,11 @@ export async function GET(req: NextRequest) {
       WHERE i.user_wallet_address = ${walletAddress}
       ORDER BY i.investment_date DESC;
     `
+
+    console.log("Portfolio fetched:", investmentsResult.length, "investments")
     return NextResponse.json(investmentsResult)
   } catch (error) {
     console.error("Error fetching user portfolio:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return NextResponse.json({ error: "Internal server error", details: error.message }, { status: 500 })
   }
 }
