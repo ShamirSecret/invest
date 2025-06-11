@@ -3,193 +3,216 @@
 import { useState } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { Asset } from "@/lib/types"
 import { useToast } from "@/hooks/use-toast"
-import { Shield, Building2, TrendingUp } from "lucide-react"
+import { invest as contractInvest } from "@/lib/contracts"
+import { MOCK_USER_WALLET } from "@/lib/constants"
+import { ArrowLeft, DollarSign, Building, Landmark } from "lucide-react"
 
 interface InvestmentModalProps {
-  asset: Asset | null
   isOpen: boolean
   onClose: () => void
-  onInvest: (assetId: number, termId: number, amount: string) => Promise<void>
+  asset: Asset
 }
 
-export function InvestmentModal({ asset, isOpen, onClose, onInvest }: InvestmentModalProps) {
-  const [selectedTermId, setSelectedTermId] = useState<string>("")
+export function InvestmentModal({ isOpen, onClose, asset }: InvestmentModalProps) {
+  const [selectedTermId, setSelectedTermId] = useState<string | null>(null)
   const [amount, setAmount] = useState<string>("")
-  const [isInvesting, setIsInvesting] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const { toast } = useToast()
 
-  if (!asset) return null
+  const selectedTerm = asset.terms?.find((term) => term.term_id.toString() === selectedTermId)
+  const estimatedProfit =
+    selectedTerm && amount
+      ? (Number.parseFloat(amount) * selectedTerm.apy * (selectedTerm.term_duration_days / 365)).toFixed(2)
+      : "0.00"
 
-  const selectedTermDetails = asset.terms.find((t) => t.term_id.toString() === selectedTermId)
-
-  const calculatedProfit = () => {
-    if (!selectedTermDetails || !amount) return "0.00"
-    const principal = Number.parseFloat(amount)
-    const apy = Number.parseFloat(selectedTermDetails.apy)
-    const days = selectedTermDetails.term_duration_days
-    if (isNaN(principal) || isNaN(apy) || isNaN(days) || principal <= 0) return "0.00"
-    const profit = principal * apy * (days / 365.0)
-    return profit.toFixed(2)
-  }
-
-  const handleSubmit = async () => {
-    if (!selectedTermId || !amount || !asset) return
-    const principal = Number.parseFloat(amount)
-    if (isNaN(principal) || principal <= 0) {
-      toast({ title: "Invalid Amount", description: "Please enter a valid positive amount.", variant: "destructive" })
+  const handleInvest = async () => {
+    if (!selectedTermId || !amount) {
+      setError("Please select a term and enter an amount.")
+      return
+    }
+    const investmentAmount = Number.parseFloat(amount)
+    if (isNaN(investmentAmount) || investmentAmount <= 0) {
+      setError("Please enter a valid positive amount.")
       return
     }
 
-    setIsInvesting(true)
+    setIsSubmitting(true)
+    setError(null)
+
     try {
-      await onInvest(asset.asset_id, Number.parseInt(selectedTermId), amount)
-      toast({ title: "Investment Submitted", description: "Your investment is being processed." })
+      const contractResponse = await contractInvest(asset.onchain_asset_id, selectedTermId, investmentAmount.toString())
+
+      if (!contractResponse.success || !contractResponse.transactionHash) {
+        throw new Error(contractResponse.error || "Smart contract investment failed.")
+      }
+
+      const response = await fetch("/api/invest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userWalletAddress: MOCK_USER_WALLET,
+          assetId: asset.asset_id,
+          termId: Number.parseInt(selectedTermId),
+          investedAmountWeusd: investmentAmount.toString(),
+          transactionHash: contractResponse.transactionHash,
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Failed to record investment.")
+      }
+
+      toast({
+        title: "Investment Successful",
+        description: `You have invested ${amount} WEUSD in ${asset.name}.`,
+      })
       onClose()
-      setSelectedTermId("")
-      setAmount("")
-    } catch (error: any) {
+    } catch (err: any) {
+      console.error("Investment error:", err)
+      setError(err.message || "An unexpected error occurred.")
       toast({
         title: "Investment Failed",
-        description: error.message || "An unexpected error occurred.",
+        description: err.message || "An unexpected error occurred.",
         variant: "destructive",
       })
     } finally {
-      setIsInvesting(false)
+      setIsSubmitting(false)
     }
   }
 
-  const getAssetIcon = () => {
-    if (asset.asset_type === "us_treasury_bond") {
-      return <Shield className="h-12 w-12 text-blue-600" />
+  const getAssetIcon = (assetType: string) => {
+    if (assetType === "us_treasury_bond") {
+      return <Landmark className="h-5 w-5 text-blue-600" />
+    } else if (assetType === "corporate_bond") {
+      return <Building className="h-5 w-5 text-blue-600" />
     }
-    return <Building2 className="h-12 w-12 text-blue-600" />
+    return <DollarSign className="h-5 w-5 text-blue-600" />
   }
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[600px] bg-white">
-        <DialogHeader className="pb-4">
-          <div className="flex items-center space-x-4">
-            <div className="p-3 bg-blue-50 rounded-full">{getAssetIcon()}</div>
-            <div>
-              <DialogTitle className="text-xl font-semibold text-gray-900">{asset.name}</DialogTitle>
-              <DialogDescription className="text-gray-600 mt-1">
-                {asset.issuer} • {asset.asset_type === "us_treasury_bond" ? "Treasury Bond" : "Corporate Bond"}
-              </DialogDescription>
+      <DialogContent className="sm:max-w-[480px] bg-white p-6 rounded-lg shadow-lg">
+        <DialogHeader className="border-b pb-4 mb-4">
+          <Button variant="ghost" size="icon" onClick={onClose} className="absolute left-4 top-4">
+            <ArrowLeft className="h-5 w-5" />
+            <span className="sr-only">Back</span>
+          </Button>
+          <DialogTitle className="text-2xl font-bold text-center text-gray-900">
+            <div className="flex items-center justify-center space-x-2">
+              {getAssetIcon(asset.asset_type)}
+              <span>{asset.name}</span>
             </div>
-          </div>
+          </DialogTitle>
+          <DialogDescription className="text-center text-gray-600">Invest in {asset.description}</DialogDescription>
         </DialogHeader>
 
-        <Tabs defaultValue="subscribe" className="w-full">
-          <TabsList className="grid w-full grid-cols-2 bg-gray-100">
-            <TabsTrigger value="subscribe" className="data-[state=active]:bg-yellow-500 data-[state=active]:text-black">
-              Subscribe
-            </TabsTrigger>
-            <TabsTrigger value="redeem" disabled className="opacity-50">
-              Redeem
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="subscribe" className="space-y-6 mt-6">
-            <div className="bg-blue-50 p-4 rounded-lg">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">YTD Return (Indicative)</span>
-                <div className="flex items-center space-x-2">
-                  <TrendingUp className="h-4 w-4 text-green-600" />
-                  <span className="text-2xl font-bold text-gray-900">
-                    {selectedTermDetails ? (Number.parseFloat(selectedTermDetails.apy) * 100).toFixed(2) : "0.00"}%
-                  </span>
+        <div className="grid gap-4 py-4">
+          <div className="flex justify-center">
+            <Tabs defaultValue="subscribe" className="w-full max-w-sm">
+              <TabsList className="grid w-full grid-cols-2 bg-gray-200 rounded-lg p-1">
+                <TabsTrigger
+                  value="subscribe"
+                  className="data-[state=active]:bg-yellow-500 data-[state=active]:text-black data-[state=active]:shadow-sm rounded-md"
+                >
+                  Subscribe
+                </TabsTrigger>
+                <TabsTrigger
+                  value="redeem"
+                  className="data-[state=active]:bg-yellow-500 data-[state=active]:text-black data-[state=active]:shadow-sm rounded-md"
+                >
+                  Redeem
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent value="subscribe" className="mt-4">
+                <div className="grid gap-4">
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label htmlFor="currency" className="text-right">
+                      Currency
+                    </Label>
+                    <Select defaultValue="weusd">
+                      <SelectTrigger className="col-span-3">
+                        <SelectValue placeholder="Select currency" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="weusd">WEstableUSD (WEUSD)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label htmlFor="balance" className="text-right">
+                      Balance
+                    </Label>
+                    <Input id="balance" value="10,000.00 WEUSD" readOnly className="col-span-3 text-right" />
+                  </div>
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label htmlFor="term" className="text-right">
+                      Term
+                    </Label>
+                    <Select
+                      onValueChange={setSelectedTermId}
+                      value={selectedTermId || ""}
+                      disabled={!asset.terms || asset.terms.length === 0}
+                    >
+                      <SelectTrigger className="col-span-3">
+                        <SelectValue placeholder="Select investment term" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {asset.terms?.map((term) => (
+                          <SelectItem key={term.term_id} value={term.term_id.toString()}>
+                            {term.term_label} ({(term.apy * 100).toFixed(2)} APY)
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label htmlFor="amount" className="text-right">
+                      Amount
+                    </Label>
+                    <Input
+                      id="amount"
+                      type="number"
+                      value={amount}
+                      onChange={(e) => setAmount(e.target.value)}
+                      placeholder="0.00"
+                      className="col-span-3 text-right"
+                    />
+                  </div>
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label htmlFor="estimated-profit" className="text-right">
+                      Est. Profit
+                    </Label>
+                    <Input
+                      id="estimated-profit"
+                      value={`${estimatedProfit} WEUSD`}
+                      readOnly
+                      className="col-span-3 text-right text-green-600 font-medium"
+                    />
+                  </div>
+                  {error && <p className="text-red-500 text-sm col-span-4 text-center">{error}</p>}
+                  <Button
+                    onClick={handleInvest}
+                    disabled={isSubmitting || !selectedTermId || !amount || Number.parseFloat(amount) <= 0}
+                    className="w-full bg-yellow-500 hover:bg-yellow-600 text-black font-medium py-2 rounded-md mt-4"
+                  >
+                    {isSubmitting ? "Investing..." : "Invest"}
+                  </Button>
                 </div>
-              </div>
-              {selectedTermDetails && (
-                <p className="text-xs text-gray-500 mt-2">Structured note linked to the performance of {asset.name}</p>
-              )}
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <Label htmlFor="currency" className="text-sm font-medium text-gray-700">
-                  Currency
-                </Label>
-                <Select value="WEUSD" disabled>
-                  <SelectTrigger className="mt-1">
-                    <SelectValue placeholder="WEUSD" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="WEUSD">WEUSD</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Label htmlFor="term" className="text-sm font-medium text-gray-700">
-                  Investment Term
-                </Label>
-                <Select value={selectedTermId} onValueChange={setSelectedTermId}>
-                  <SelectTrigger className="mt-1">
-                    <SelectValue placeholder="Select investment term" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {asset.terms.map((term) => (
-                      <SelectItem key={term.term_id} value={term.term_id.toString()}>
-                        {term.term_label} ({(Number.parseFloat(term.apy) * 100).toFixed(2)}% APY)
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Label htmlFor="amount" className="text-sm font-medium text-gray-700">
-                  Amount
-                </Label>
-                <Input
-                  id="amount"
-                  type="number"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  className="mt-1"
-                  placeholder="0.00"
-                />
-                <div className="flex justify-between text-xs text-gray-500 mt-1">
-                  <span>Balance: 1,000,000 WEUSD</span>
-                  <span>Min: 100 WEUSD</span>
-                </div>
-              </div>
-
-              <div>
-                <Label htmlFor="estimated" className="text-sm font-medium text-gray-700">
-                  Estimated
-                </Label>
-                <Input
-                  id="estimated"
-                  type="text"
-                  value={calculatedProfit()}
-                  disabled
-                  className="mt-1 bg-gray-50"
-                  placeholder="0.00"
-                />
-                <div className="text-xs text-gray-500 mt-1">
-                  <span>Estimated profit: {calculatedProfit()} WEUSD</span>
-                </div>
-              </div>
-            </div>
-
-            <Button
-              onClick={handleSubmit}
-              disabled={!selectedTermId || !amount || isInvesting}
-              className="w-full bg-yellow-500 hover:bg-yellow-600 text-black font-medium py-3"
-            >
-              {isInvesting ? "Processing..." : "Sign up"}
-            </Button>
-          </TabsContent>
-        </Tabs>
+              </TabsContent>
+              <TabsContent value="redeem" className="mt-4">
+                <div className="text-center text-gray-500">Redeem functionality is available on your dashboard.</div>
+              </TabsContent>
+            </Tabs>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   )

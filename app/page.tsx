@@ -1,26 +1,25 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { Button } from "@/components/ui/button"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { InvestmentCard } from "@/components/investment-card"
 import { InvestmentModal } from "@/components/investment-modal"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Button } from "@/components/ui/button"
 import type { Asset } from "@/lib/types"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useToast } from "@/hooks/use-toast"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { AlertCircle, Wallet } from "lucide-react"
+import Image from "next/image"
+import { Wallet, Home } from "lucide-react"
 
-export default function InvestPage() {
+export default function HomePage() {
   const [assets, setAssets] = useState<Asset[]>([])
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null)
+  const [isModalOpen, setIsModalOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState("all")
-  const { toast } = useToast()
+  const [filter, setFilter] = useState<"All" | "us_treasury_bond" | "corporate_bond" | "ended">("All")
 
   useEffect(() => {
-    async function fetchAssets() {
+    const fetchAssets = async () => {
       setIsLoading(true)
       setError(null)
       try {
@@ -29,60 +28,36 @@ export default function InvestPage() {
           throw new Error(`HTTP error! status: ${response.status}`)
         }
         const data = await response.json()
-        console.log("Fetched assets:", data)
-        setAssets(Array.isArray(data) ? data : [])
+        setAssets(data)
       } catch (error) {
         console.error("Error fetching assets:", error)
-        setError("Could not load investment assets. Please try again later.")
-        toast({
-          title: "Error",
-          description: "Could not load investment assets.",
-          variant: "destructive",
-        })
+        setError("Failed to load investment assets. Please try again later.")
       } finally {
         setIsLoading(false)
       }
     }
     fetchAssets()
-  }, [toast])
+  }, [])
 
-  const handleSelectAsset = (asset: Asset) => {
+  const handleInvestClick = (asset: Asset) => {
     setSelectedAsset(asset)
+    setIsModalOpen(true)
   }
 
   const handleCloseModal = () => {
+    setIsModalOpen(false)
     setSelectedAsset(null)
   }
 
-  const handleInvest = async (assetId: number, termId: number, amount: string) => {
-    try {
-      const response = await fetch("/api/invest", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assetId, termId, amountWEUSDString: amount }),
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || "Investment failed")
-      }
-
-      const result = await response.json()
-      toast({
-        title: "Investment Successful",
-        description: `Your investment has been processed. Transaction: ${result.transactionHash}`,
-      })
-    } catch (error: any) {
-      console.error("Investment error:", error)
-      throw error
-    }
-  }
-
   const filteredAssets = assets.filter((asset) => {
-    if (activeTab === "all") return true
-    if (activeTab === "treasury") return asset.asset_type === "us_treasury_bond"
-    if (activeTab === "corporate") return asset.asset_type === "corporate_bond"
-    return true
+    if (filter === "All") return true
+    if (filter === "ended") {
+      // For 'ended' filter, we'd need a more sophisticated check,
+      // e.g., if all terms are inactive or if a specific 'end_date' for the asset has passed.
+      // For now, we'll just return false as we don't have this data.
+      return false
+    }
+    return asset.asset_type === filter
   })
 
   return (
@@ -92,13 +67,18 @@ export default function InvestPage() {
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center space-x-8">
             <div className="flex items-center space-x-2">
-              <div className="w-8 h-8 bg-yellow-500 rounded-lg flex items-center justify-center">
-                <span className="text-black font-bold text-sm">RW</span>
-              </div>
-              <span className="text-xl font-bold text-gray-900">RWAInvest</span>
+              <Image
+                src="/images/picwe-logo.png"
+                alt="PicWe Invest Logo"
+                width={32}
+                height={32}
+                className="rounded-lg"
+              />
+              <span className="text-xl font-bold text-gray-900">PicWe Invest</span>
             </div>
             <nav className="hidden md:flex space-x-6">
-              <a href="/" className="text-gray-900 font-medium">
+              <a href="/" className="text-gray-900 font-medium flex items-center">
+                <Home className="mr-1 h-4 w-4" />
                 Home
               </a>
               <a href="/dashboard" className="text-gray-600 hover:text-gray-900">
@@ -116,76 +96,72 @@ export default function InvestPage() {
         </div>
       </header>
 
-      <div className="container mx-auto py-8 px-4">
-        <header className="mb-8">
-          <h1 className="text-4xl font-bold tracking-tight text-gray-900 mb-2">The Launchpad For Real World Assets</h1>
-          <p className="text-gray-600 text-lg">
-            RWAInvest is the world's first decentralized infrastructure/lending omni-chain launchpad for traders and
+      {/* Hero Section */}
+      <section className="bg-white py-20">
+        <div className="container mx-auto px-4 text-center">
+          <h1 className="text-5xl font-bold tracking-tight text-gray-900 mb-4">The Launchpad For Real Founders</h1>
+          <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+            PicWe is the world's first decentralized infrastructure enabling omni-chain liquidity for traders and
             developers.
           </p>
-        </header>
+        </div>
+      </section>
+
+      {/* Investment Assets Section */}
+      <section className="container mx-auto py-12 px-4">
+        <div className="flex justify-center mb-8">
+          <Tabs value={filter} onValueChange={(value) => setFilter(value as any)} className="w-full max-w-md">
+            <TabsList className="grid w-full grid-cols-4 bg-gray-200 rounded-lg p-1">
+              <TabsTrigger
+                value="All"
+                className="data-[state=active]:bg-yellow-500 data-[state=active]:text-black data-[state=active]:shadow-sm rounded-md"
+              >
+                All
+              </TabsTrigger>
+              <TabsTrigger
+                value="us_treasury_bond"
+                className="data-[state=active]:bg-yellow-500 data-[state=active]:text-black data-[state=active]:shadow-sm rounded-md"
+              >
+                Treasury
+              </TabsTrigger>
+              <TabsTrigger
+                value="corporate_bond"
+                className="data-[state=active]:bg-yellow-500 data-[state=active]:text-black data-[state=active]:shadow-sm rounded-md"
+              >
+                Corporate
+              </TabsTrigger>
+              <TabsTrigger
+                value="ended"
+                className="data-[state=active]:bg-yellow-500 data-[state=active]:text-black data-[state=active]:shadow-sm rounded-md"
+              >
+                Ended
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
 
         {error && (
-          <Alert variant="destructive" className="mb-6">
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
+          <div className="text-center text-red-600 py-8">
+            <p>{error}</p>
+          </div>
         )}
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="mb-8">
-          <TabsList className="bg-white border border-gray-200 p-1">
-            <TabsTrigger
-              value="all"
-              className="data-[state=active]:bg-yellow-500 data-[state=active]:text-black font-medium"
-            >
-              All
-            </TabsTrigger>
-            <TabsTrigger
-              value="treasury"
-              className="data-[state=active]:bg-yellow-500 data-[state=active]:text-black font-medium"
-            >
-              Treasury
-            </TabsTrigger>
-            <TabsTrigger
-              value="corporate"
-              className="data-[state=active]:bg-yellow-500 data-[state=active]:text-black font-medium"
-            >
-              Corporate
-            </TabsTrigger>
-            <TabsTrigger value="ended" disabled className="opacity-50">
-              Ended
-            </TabsTrigger>
-          </TabsList>
+        {isLoading ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {[...Array(6)].map((_, i) => (
+              <Skeleton key={i} className="h-[200px] w-full rounded-lg" />
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filteredAssets.map((asset) => (
+              <InvestmentCard key={asset.asset_id} asset={asset} onInvestClick={handleInvestClick} />
+            ))}
+          </div>
+        )}
+      </section>
 
-          <TabsContent value={activeTab} className="mt-6">
-            {isLoading ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {[1, 2, 3, 4, 5, 6].map((i) => (
-                  <Skeleton key={i} className="h-[320px] w-full rounded-lg" />
-                ))}
-              </div>
-            ) : filteredAssets.length === 0 ? (
-              <div className="text-center py-12">
-                <p className="text-gray-500 text-lg">No investment assets available in this category.</p>
-                <p className="text-sm text-gray-400 mt-2">Please check other categories or try again later.</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredAssets.map((asset) => (
-                  <InvestmentCard key={asset.asset_id} asset={asset} onSelectAsset={handleSelectAsset} />
-                ))}
-              </div>
-            )}
-          </TabsContent>
-        </Tabs>
-
-        <InvestmentModal
-          asset={selectedAsset}
-          isOpen={!!selectedAsset}
-          onClose={handleCloseModal}
-          onInvest={handleInvest}
-        />
-      </div>
+      {selectedAsset && <InvestmentModal isOpen={isModalOpen} onClose={handleCloseModal} asset={selectedAsset} />}
     </div>
   )
 }

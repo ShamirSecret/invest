@@ -1,53 +1,71 @@
 "use client"
 
-import type React from "react"
+import { Skeleton } from "@/components/ui/skeleton"
+
 import { useEffect, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import type { AdminDashboardMetrics } from "@/lib/types"
-import { Skeleton } from "@/components/ui/skeleton"
-import { DollarSign, TrendingUp, Users, ListChecks, CheckCircle, Wallet, Home } from "lucide-react"
-import { useToast } from "@/hooks/use-toast"
 import { Button } from "@/components/ui/button"
-import { depositProfitForAsset, checkProfitPoolBalances } from "@/lib/contracts"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { parseUnits, formatUnits } from "viem"
-import { WEUSD_DECIMALS } from "@/lib/constants"
+import { useToast } from "@/hooks/use-toast"
+import type { PlatformMetrics } from "@/lib/types"
+import { depositProfitForAsset, checkProfitPoolBalances } from "@/lib/contracts"
+import { Wallet, Home } from "lucide-react"
+import Image from "next/image"
 
 export default function AdminDashboardPage() {
-  const [metrics, setMetrics] = useState<AdminDashboardMetrics | null>(null)
-  const [profitPools, setProfitPools] = useState<Record<string, bigint>>({})
+  const [metrics, setMetrics] = useState<PlatformMetrics | null>(null)
   const [isLoadingMetrics, setIsLoadingMetrics] = useState(true)
-  const [isLoadingPools, setIsLoadingPools] = useState(true)
-  const { toast } = useToast()
+  const [errorMetrics, setErrorMetrics] = useState<string | null>(null)
 
-  const [depositAssetId, setDepositAssetId] = useState("")
+  const [assetIdToDeposit, setAssetIdToDeposit] = useState("")
   const [depositAmount, setDepositAmount] = useState("")
   const [isDepositing, setIsDepositing] = useState(false)
+  const [depositError, setDepositError] = useState<string | null>(null)
+
+  const [profitPoolBalances, setProfitPoolBalances] = useState<Record<string, string>>({})
+  const [isLoadingPools, setIsLoadingPools] = useState(true)
+  const [errorPools, setErrorPools] = useState<string | null>(null)
+
+  const { toast } = useToast()
 
   const fetchMetrics = async () => {
     setIsLoadingMetrics(true)
+    setErrorMetrics(null)
     try {
       const response = await fetch("/api/admin/metrics")
-      if (!response.ok) throw new Error("Failed to fetch metrics")
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
       const data = await response.json()
       setMetrics(data)
     } catch (error) {
-      console.error(error)
-      toast({ title: "Error", description: "Could not load platform metrics.", variant: "destructive" })
+      console.error("Error fetching metrics:", error)
+      setErrorMetrics("Failed to load platform metrics.")
+      toast({
+        title: "Error",
+        description: "Failed to load platform metrics.",
+        variant: "destructive",
+      })
     } finally {
       setIsLoadingMetrics(false)
     }
   }
 
-  const fetchProfitPools = async () => {
+  const fetchProfitPoolBalances = async () => {
     setIsLoadingPools(true)
+    setErrorPools(null)
     try {
-      const pools = await checkProfitPoolBalances()
-      setProfitPools(pools)
+      const balances = await checkProfitPoolBalances()
+      setProfitPoolBalances(balances)
     } catch (error) {
-      console.error(error)
-      toast({ title: "Error", description: "Could not load profit pool balances.", variant: "destructive" })
+      console.error("Error checking profit pool balances:", error)
+      setErrorPools("Failed to load profit pool balances.")
+      toast({
+        title: "Error",
+        description: "Failed to load profit pool balances.",
+        variant: "destructive",
+      })
     } finally {
       setIsLoadingPools(false)
     }
@@ -55,69 +73,49 @@ export default function AdminDashboardPage() {
 
   useEffect(() => {
     fetchMetrics()
-    fetchProfitPools()
-  }, [toast])
+    fetchProfitPoolBalances()
+  }, [])
 
-  const handleDepositProfit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!depositAssetId || !depositAmount) {
-      toast({ title: "Missing fields", description: "Please provide asset ID and amount.", variant: "destructive" })
+  const handleDepositProfit = async () => {
+    if (!assetIdToDeposit || !depositAmount) {
+      setDepositError("Please enter both Asset ID and Amount.")
       return
     }
-    const amountWei = parseUnits(depositAmount, WEUSD_DECIMALS)
-    if (amountWei <= 0n) {
-      toast({ title: "Invalid Amount", description: "Deposit amount must be positive.", variant: "destructive" })
+    const amount = Number.parseFloat(depositAmount)
+    if (isNaN(amount) || amount <= 0) {
+      setDepositError("Please enter a valid positive amount.")
       return
     }
 
     setIsDepositing(true)
+    setDepositError(null)
     try {
-      const result = await depositProfitForAsset(depositAssetId, amountWei)
-      if (result.success) {
+      // Pass the parsed float amount directly, as the mock function expects a number
+      const response = await depositProfitForAsset(assetIdToDeposit, amount)
+      if (response.success) {
         toast({
           title: "Profit Deposited",
-          description: `Successfully deposited ${depositAmount} weUSD for asset ${depositAssetId}. Tx: ${result.transactionHash}`,
+          description: `Successfully deposited ${amount} WEUSD for Asset ID: ${assetIdToDeposit}. Transaction: ${response.transactionHash}`,
         })
-        setDepositAssetId("")
+        setAssetIdToDeposit("")
         setDepositAmount("")
-        fetchProfitPools()
-        fetchMetrics()
+        fetchProfitPoolBalances() // Refresh balances after deposit
+        fetchMetrics() // Refresh metrics as totalProfitDeposited might change
       } else {
-        throw new Error("Failed to deposit profit via smart contract.")
+        throw new Error(response.error || "Failed to deposit profit via smart contract.")
       }
     } catch (error: any) {
-      toast({ title: "Deposit Failed", description: error.message || "An error occurred.", variant: "destructive" })
+      console.error("Deposit error:", error)
+      setDepositError(error.message || "An unexpected error occurred during deposit.")
+      toast({
+        title: "Deposit Failed",
+        description: error.message || "An unexpected error occurred.",
+        variant: "destructive",
+      })
     } finally {
       setIsDepositing(false)
     }
   }
-
-  const MetricCard = ({
-    title,
-    value,
-    icon,
-    isLoadingValue,
-    unit = "WEUSD",
-  }: { title: string; value?: string | number; icon: React.ReactNode; isLoadingValue: boolean; unit?: string }) => (
-    <Card className="bg-white border border-gray-200">
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-sm font-medium text-gray-600">{title}</CardTitle>
-        {icon}
-      </CardHeader>
-      <CardContent>
-        {isLoadingValue ? (
-          <Skeleton className="h-8 w-3/4" />
-        ) : (
-          <div className="text-2xl font-bold text-gray-900">
-            {typeof value === "number" ? value.toLocaleString() : value}
-            {value !== undefined && unit && typeof value !== "number" && (
-              <span className="text-xs text-gray-500 ml-1">{unit}</span>
-            )}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  )
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -126,10 +124,14 @@ export default function AdminDashboardPage() {
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center space-x-8">
             <div className="flex items-center space-x-2">
-              <div className="w-8 h-8 bg-yellow-500 rounded-lg flex items-center justify-center">
-                <span className="text-black font-bold text-sm">RW</span>
-              </div>
-              <span className="text-xl font-bold text-gray-900">RWAInvest</span>
+              <Image
+                src="/images/picwe-logo.png"
+                alt="PicWe Invest Logo"
+                width={32}
+                height={32}
+                className="rounded-lg"
+              />
+              <span className="text-xl font-bold text-gray-900">PicWe Invest</span>
             </div>
             <nav className="hidden md:flex space-x-6">
               <a href="/" className="text-gray-600 hover:text-gray-900 flex items-center">
@@ -154,159 +156,159 @@ export default function AdminDashboardPage() {
       <div className="container mx-auto py-8 px-4">
         <header className="mb-8">
           <h1 className="text-4xl font-bold tracking-tight text-gray-900 mb-2">Admin Dashboard</h1>
-          <p className="text-gray-600">Manage and monitor the RWA investment platform.</p>
+          <p className="text-gray-600">Manage platform assets and view key metrics.</p>
         </header>
 
-        <section className="mb-8">
-          <h2 className="text-2xl font-semibold mb-4 text-gray-900">Platform Metrics</h2>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            <MetricCard
-              title="Total Investment"
-              value={
-                metrics?.total_investment_weusd
-                  ? Number.parseFloat(metrics.total_investment_weusd).toLocaleString(undefined, {
+        {/* Platform Metrics */}
+        <Card className="mb-8 bg-white border border-gray-200">
+          <CardHeader>
+            <CardTitle className="text-xl font-semibold text-gray-900">Platform Metrics</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {isLoadingMetrics ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <Skeleton className="h-24 w-full" />
+                <Skeleton className="h-24 w-full" />
+                <Skeleton className="h-24 w-full" />
+              </div>
+            ) : errorMetrics ? (
+              <div className="text-red-600">{errorMetrics}</div>
+            ) : metrics ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="p-4 border rounded-lg bg-gray-50">
+                  <h3 className="text-sm font-medium text-gray-600">Total Investment</h3>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {/* Removed BigInt and formatUnits, directly parse float */}
+                    {Number.parseFloat(metrics.total_investment_weusd).toLocaleString(undefined, {
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 2,
-                    })
-                  : "0.00"
-              }
-              icon={<DollarSign className="h-4 w-4 text-gray-400" />}
-              isLoadingValue={isLoadingMetrics}
-            />
-            <MetricCard
-              title="Total Active Investment"
-              value={
-                metrics?.total_active_investment_weusd
-                  ? Number.parseFloat(metrics.total_active_investment_weusd).toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })
-                  : "0.00"
-              }
-              icon={<TrendingUp className="h-4 w-4 text-gray-400" />}
-              isLoadingValue={isLoadingMetrics}
-            />
-            <MetricCard
-              title="Total Profit Deposited"
-              value={
-                metrics?.total_profit_deposited_weusd
-                  ? Number.parseFloat(metrics.total_profit_deposited_weusd).toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })
-                  : "0.00"
-              }
-              icon={<DollarSign className="h-4 w-4 text-gray-400" />}
-              isLoadingValue={isLoadingMetrics}
-            />
-            <MetricCard
-              title="Total Profit Claimed"
-              value={
-                metrics?.total_profit_claimed_weusd
-                  ? Number.parseFloat(metrics.total_profit_claimed_weusd).toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })
-                  : "0.00"
-              }
-              icon={<CheckCircle className="h-4 w-4 text-gray-400" />}
-              isLoadingValue={isLoadingMetrics}
-            />
-            <MetricCard
-              title="Active Investments Count"
-              value={metrics?.active_investment_count}
-              icon={<Users className="h-4 w-4 text-gray-400" />}
-              isLoadingValue={isLoadingMetrics}
-              unit=""
-            />
-            <MetricCard
-              title="Total Investments Count"
-              value={metrics?.total_investment_count}
-              icon={<ListChecks className="h-4 w-4 text-gray-400" />}
-              isLoadingValue={isLoadingMetrics}
-              unit=""
-            />
-          </div>
-        </section>
-
-        <section className="mb-8">
-          <h2 className="text-2xl font-semibold mb-4 text-gray-900">Deposit Profits to Asset Pools</h2>
-          <Card className="bg-white border border-gray-200">
-            <CardHeader>
-              <CardTitle className="text-xl font-semibold text-gray-900">Deposit Profit</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleDepositProfit} className="space-y-4">
-                <div>
-                  <Label htmlFor="depositAssetId" className="text-sm font-medium text-gray-700">
-                    On-Chain Asset ID
-                  </Label>
-                  <Input
-                    id="depositAssetId"
-                    value={depositAssetId}
-                    onChange={(e) => setDepositAssetId(e.target.value)}
-                    placeholder="e.g., USTB-2024-Q4"
-                    className="mt-1"
-                  />
+                    })}{" "}
+                    WEUSD
+                  </p>
                 </div>
-                <div>
-                  <Label htmlFor="depositAmount" className="text-sm font-medium text-gray-700">
-                    Amount (WEstableUSD)
-                  </Label>
-                  <Input
-                    id="depositAmount"
-                    type="number"
-                    value={depositAmount}
-                    onChange={(e) => setDepositAmount(e.target.value)}
-                    placeholder="e.g., 10000"
-                    className="mt-1"
-                  />
+                <div className="p-4 border rounded-lg bg-gray-50">
+                  <h3 className="text-sm font-medium text-gray-600">Total Active Investment</h3>
+                  <p className="text-2xl font-bold text-blue-600">
+                    {/* Removed BigInt and formatUnits, directly parse float */}
+                    {Number.parseFloat(metrics.total_active_investment_weusd).toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}{" "}
+                    WEUSD
+                  </p>
                 </div>
-                <Button
-                  type="submit"
-                  disabled={isDepositing}
-                  className="bg-yellow-500 hover:bg-yellow-600 text-black font-medium"
-                >
-                  {isDepositing ? "Depositing..." : "Deposit Profit"}
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
-        </section>
+                <div className="p-4 border rounded-lg bg-gray-50">
+                  <h3 className="text-sm font-medium text-gray-600">Total Profit Deposited</h3>
+                  <p className="text-2xl font-bold text-green-600">
+                    {/* Removed BigInt and formatUnits, directly parse float */}
+                    {Number.parseFloat(metrics.total_profit_deposited_weusd).toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}{" "}
+                    WEUSD
+                  </p>
+                </div>
+                <div className="p-4 border rounded-lg bg-gray-50">
+                  <h3 className="text-sm font-medium text-gray-600">Total Profit Claimed</h3>
+                  <p className="text-2xl font-bold text-purple-600">
+                    {/* Removed BigInt and formatUnits, directly parse float */}
+                    {Number.parseFloat(metrics.total_profit_claimed_weusd).toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}{" "}
+                    WEUSD
+                  </p>
+                </div>
+                <div className="p-4 border rounded-lg bg-gray-50">
+                  <h3 className="text-sm font-medium text-gray-600">Active Investments Count</h3>
+                  <p className="text-2xl font-bold text-orange-600">
+                    {metrics.active_investment_count.toLocaleString()}
+                  </p>
+                </div>
+                <div className="p-4 border rounded-lg bg-gray-50">
+                  <h3 className="text-sm font-medium text-gray-600">Total Investments Count</h3>
+                  <p className="text-2xl font-bold text-gray-900">{metrics.total_investment_count.toLocaleString()}</p>
+                </div>
+              </div>
+            ) : (
+              <p className="text-gray-500">No metrics available.</p>
+            )}
+          </CardContent>
+        </Card>
 
-        <section>
-          <h2 className="text-2xl font-semibold mb-4 text-gray-900">Asset Profit Pool Balances (On-Chain)</h2>
-          <Card className="bg-white border border-gray-200">
-            <CardHeader>
-              <CardTitle className="text-xl font-semibold text-gray-900">Pool Balances</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {isLoadingPools ? (
-                <Skeleton className="h-20 w-full" />
-              ) : Object.keys(profitPools).length === 0 ? (
-                <p className="text-gray-500">No profit pool data available.</p>
-              ) : (
-                <ul className="space-y-2">
-                  {Object.entries(profitPools).map(([assetId, balance]) => (
-                    <li
-                      key={assetId}
-                      className="flex justify-between items-center p-3 border border-gray-200 rounded-md"
-                    >
-                      <span className="font-medium text-gray-900">{assetId}</span>
-                      <span className="text-green-600 font-semibold">
-                        {Number.parseFloat(formatUnits(balance, WEUSD_DECIMALS)).toLocaleString(undefined, {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}{" "}
-                        WEUSD
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
-        </section>
+        {/* Deposit Profit */}
+        <Card className="mb-8 bg-white border border-gray-200">
+          <CardHeader>
+            <CardTitle className="text-xl font-semibold text-gray-900">Deposit Profit to Asset Pool</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="assetIdToDeposit">Asset ID (On-chain)</Label>
+                <Input
+                  id="assetIdToDeposit"
+                  placeholder="e.g., USTB-2024-Q4"
+                  value={assetIdToDeposit}
+                  onChange={(e) => setAssetIdToDeposit(e.target.value)}
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label htmlFor="depositAmount">Amount (WEUSD)</Label>
+                <Input
+                  id="depositAmount"
+                  type="number"
+                  placeholder="e.g., 1000.00"
+                  value={depositAmount}
+                  onChange={(e) => setDepositAmount(e.target.value)}
+                  className="mt-1"
+                />
+              </div>
+            </div>
+            {depositError && <p className="text-red-500 text-sm mt-2">{depositError}</p>}
+            <Button
+              onClick={handleDepositProfit}
+              disabled={isDepositing}
+              className="mt-6 bg-yellow-500 hover:bg-yellow-600 text-black font-medium"
+            >
+              {isDepositing ? "Depositing..." : "Deposit Profit"}
+            </Button>
+          </CardContent>
+        </Card>
+
+        {/* Profit Pool Balances */}
+        <Card className="bg-white border border-gray-200">
+          <CardHeader>
+            <CardTitle className="text-xl font-semibold text-gray-900">Profit Pool Balances</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {isLoadingPools ? (
+              <div className="space-y-2">
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+              </div>
+            ) : errorPools ? (
+              <div className="text-red-600">{errorPools}</div>
+            ) : Object.keys(profitPoolBalances).length === 0 ? (
+              <p className="text-gray-500">No profit pool balances available.</p>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {Object.entries(profitPoolBalances).map(([assetId, balance]) => (
+                  <div key={assetId} className="p-4 border rounded-lg bg-gray-50">
+                    <h3 className="text-sm font-medium text-gray-600">Asset ID: {assetId}</h3>
+                    <p className="text-xl font-bold text-gray-900">
+                      {Number.parseFloat(balance).toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}{" "}
+                      WEUSD
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   )

@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast"
 import { redeem as contractRedeem } from "@/lib/contracts"
 import { ArrowDownToLine, CheckCircle, Clock, Wallet, Home } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import Image from "next/image"
 
 export default function UserDashboardPage() {
   const [investments, setInvestments] = useState<Investment[]>([])
@@ -135,10 +136,14 @@ export default function UserDashboardPage() {
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center space-x-8">
             <div className="flex items-center space-x-2">
-              <div className="w-8 h-8 bg-yellow-500 rounded-lg flex items-center justify-center">
-                <span className="text-black font-bold text-sm">RW</span>
-              </div>
-              <span className="text-xl font-bold text-gray-900">RWAInvest</span>
+              <Image
+                src="/images/picwe-logo.png"
+                alt="PicWe Invest Logo"
+                width={32}
+                height={32}
+                className="rounded-lg"
+              />
+              <span className="text-xl font-bold text-gray-900">PicWe Invest</span>
             </div>
             <nav className="hidden md:flex space-x-6">
               <a href="/" className="text-gray-600 hover:text-gray-900 flex items-center">

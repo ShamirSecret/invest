@@ -7,9 +7,9 @@ import { Toaster } from "@/components/ui/toaster"
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "RWAInvest - Real World Asset Investment Platform",
-  description: "Invest in tokenized Real World Assets with WEstableUSD",
-    generator: 'v0.dev'
+  title: "PicWe Invest - Real World Asset Investment Platform",
+  description: "Invest in tokenized Real World Assets with WEstableUSD on PicWe Invest",
+  generator: "v0.dev",
 }
 
 export default function RootLayout({
